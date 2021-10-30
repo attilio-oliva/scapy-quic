@@ -1,2 +1,4 @@
 .vscode/settings.json
 __pycache__/packets.cpython-39.pyc
+__pycache__/varint.cpython-39.pyc
+.vscode/launch.json

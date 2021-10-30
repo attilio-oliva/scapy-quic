@@ -2,19 +2,30 @@ from scapy.all import *
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 
-class QuicVarLenField(Field):
-    __slots__ = ["fld"]
-    length = 0
+from varint import VarInt
 
-    def __init__(self, name, default, length_of):
+class QuicVarLenField(Field):
+    __slots__ = ["fld", "is_packet_length","pkt_length"]
+
+    def __init__(self, name, default, length_of=None):
         Field.__init__(self, name, default)
-        self.fld = length_of
+        if name == "length" and length_of is None:
+            self.is_packet_length = True
+        else:
+            self.fld = length_of
+            self.is_packet_length = False
+        self.pkt_length = 0
 
     def i2m(self, pkt, x):
         if x is None:
-            f = pkt.get_field(self.fld)
-            x = f.i2len(pkt, pkt.getfieldval(self.fld))
-            x = vlenq2str(x)
+            if self.is_packet_length:
+                #print(len(pkt))
+                #x = len(pkt)
+                x = vlenq2str(0)
+            else:
+                f = pkt.get_field(self.fld)
+                x = f.i2len(pkt, pkt.getfieldval(self.fld))
+                x = vlenq2str(x)
         return raw(x)
 
     def m2i(self, pkt, x):
@@ -33,9 +44,9 @@ class QUIC(Packet):
         # Flags
         BitEnumField("header_type", 1 , 1 , {0:"short", 1:"long"}) ,
         BitEnumField("fixed_bit", 1, 1, {0:"error", 1:"1"}) ,
-        BitEnumField("type", 0, 2, {0:"initial", 1:"0- RTT", 2:"handshake", 3:"retry"}),
+        BitEnumField("type", 0, 2, {0:"initial", 1:"0-RTT", 2:"handshake", 3:"retry"}),
         BitField("reserved", 0, 2) ,
-        BitFieldLenField("PNL", None , 2 , length_of ="PN", adjust = lambda pkt,x: x-1) ,
+        BitFieldLenField("PNL", 0 , 2 , length_of ="PN", adjust = lambda pkt,x: x-1) ,
         # Version
         XIntField("version", 0x0 ) ,
         # Connection IDs(DCID / SCID )
@@ -49,8 +60,8 @@ class QUIC(Packet):
         ConditionalField(StrLenField("token", b'', length_from = lambda pkt : pkt.token_length ),
                             lambda pkt : pkt.version != 0 and pkt.type == 0),
         # Length(only when type is 0 - RTT or initial )
-        #ConditionalField(QuicVarLenField("length", None ) ,
-        #                   lambda pkt : pkt.version != 0 and pkt.type != 3) ,
+        ConditionalField(QuicVarLenField("length", None) ,
+                           lambda pkt : pkt.version != 0 and pkt.type != 3) ,
         # Packet Number(only when type is 0 - RTT or initial )
         ConditionalField(StrLenField("PN", b'\x00', length_from = lambda pkt : pkt.PNL+1) ,
                             lambda pkt : pkt.version != 0 and pkt.type != 3) ]
@@ -81,8 +92,19 @@ class QUIC(Packet):
             encrypted_header[-PNL + i] ^= mask[i+1]
         encrypted_header = bytes(encrypted_header)
         return encrypted_header + encrypted_payload
-
-
+    
+    def post_build(self, p, pay):
+        #p += pay  # if you also want the payload to be taken into account
+        pay =b"p"*1200
+        if self.length is None:
+            tmp_len = len(str(self.PNL))+len(pay)
+            encoded_len = VarInt(tmp_len).encode()
+            print(bytearray(encoded_len)[0], tmp_len)
+            p = p[:-(2+self.PNL)] + encoded_len + p[-(2+self.PNL):]  # Adds length as short on bytes 3-4
+        print(tmp_len)
+        #return p + pay # edit if previous is changed
+        return p
+  
 
 def vlenq2str(l):
     s = []
