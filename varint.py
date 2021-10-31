@@ -3,21 +3,27 @@ import math
 class VarInt():
     __slots__ = ["number","bytes"]
 
-    def __init__(self, val=''):
+    def __init__(self, val=0):
         if type(val) is int:
             self.number = val
         elif type(val) is bytes:
             self.bytes = val
         elif type(val) is str:
-            self.bytes = bytes.fromhex(val)
+            self.bytes = bytes(val,'utf-8')
 
     def encode(self,num=None):
         if num is None:
             num = self.number
         self.number = num
 
+        # We need atleast 1 bit that translate in atleast 1 byte
+        # bit_length() returns 0 if the integer is 0
         bit_length = num.bit_length()
+        bit_length = max(bit_length, 1)
+
         byte_length = math.ceil(bit_length/8)
+        byte_length = max(byte_length, 1)
+
         encoded_length = math.ceil(math.log(byte_length,2))
         encoded_num = num | encoded_length << (bit_length-1)
        
@@ -48,4 +54,4 @@ class VarInt():
         for x in range(1,length):
             v = (v << 8) + byte_array[x]
         self.number = v
-        return self.number
+        return self.number, length

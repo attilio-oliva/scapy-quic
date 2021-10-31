@@ -2,3 +2,5 @@
 __pycache__/packets.cpython-39.pyc
 __pycache__/varint.cpython-39.pyc
 .vscode/launch.json
+__pycache__/fields.cpython-39.pyc
+__pycache__/frames.cpython-39.pyc
