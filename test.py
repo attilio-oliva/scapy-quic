@@ -39,14 +39,16 @@ for x in range(50,51):
     udp_packet = UDP(sport=src_port, dport=dst_port)
 
     #padding = PaddingFrame()
-    #for i in range(0,20):
-    #    padding /= PaddingFrame()
+    
+    #padding = bytes(PaddingFrame())*1020
     #padding = bytes(padding)
 
     # workaround to update lenght field...
     quic_packet = QUIC(bytes(QUIC(type=0, header_type=1, version=0x1 ,SCID = SCID, DCID=DCID) / payload))
     #quic_packet.show2()
+    #print(QUIC.encode_packet_number(0), quic_packet["QUIC"].PN)
     quic_packet = QUIC.protect((key,iv,hp), quic_packet)
+    
     spoofed_packet = ip_packet / udp_packet / quic_packet 
     send(spoofed_packet)
     time.sleep(0.01)

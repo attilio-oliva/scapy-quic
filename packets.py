@@ -37,9 +37,10 @@ class QUIC(Packet):
         header = packet.copy()
         header.payload = Raw()
         payload = packet[1]
-        raw_header = header.set_length(raw(header),raw(payload))
+        raw_header = raw(header)
         # Compute nonce
-        nonce = int.from_bytes(iv , byteorder = 'big') ^ int.from_bytes(header.PN , byteorder = 'big')
+        nonce = int.from_bytes(iv , byteorder = 'big') ^ int.from_bytes(header.PN, byteorder = 'big')
+        #nonce = bytearray(nonce.to_bytes(math.ceil(nonce.bit_length()/8), byteorder = 'big'))[-12:]
         nonce = nonce.to_bytes(12, byteorder = 'big')
         # Encrypt the payload
         encryptor = Cipher(algorithms.AES(key), modes.GCM(nonce), backend = default_backend()).encryptor()
@@ -66,12 +67,28 @@ class QUIC(Packet):
         #pkt += pay  # if you also want the payload to be taken into account
         if self.length is None:
             pkt_len = len(pay)
-            print(pkt_len)
-            tmp_len = self.PNL+pkt_len
+            tmp_len = self.PNL + 1 + pkt_len
             encoded_len = VarInt(tmp_len).encode()
-            # Adds length as short on bytes 3-4
-            pkt = pkt[:-(2+self.PNL)] + encoded_len + pkt[-(2+self.PNL):]  
+            print(tmp_len, encoded_len)
+            # Adds length before PN field
+            pkt = pkt[:-(self.PNL+2)] + encoded_len + pkt[-(self.PNL+1):]  
         return pkt
 
     def post_build(self, pkt, pay):
         return self.set_length(pkt, pay) + pay
+    
+    def encode_packet_number(full_pn, largest_acked=None):
+        # The number of bits must be at least one more
+        # than the base-2 logarithm of the number of contiguous
+        # unacknowledged packet numbers, including the new packet.
+        if largest_acked is None or largest_acked == 0:
+            num_unacked = full_pn + 1
+        else:
+            num_unacked = full_pn - largest_acked
+
+        min_bits = math.log(num_unacked, 2) + 1
+        num_bytes = math.ceil(min_bits / 8)
+
+        # Encode the integer value and truncate to
+        # the num_bytes least significant bytes.
+        return full_pn.to_bytes(num_bytes,'big')
