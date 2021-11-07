@@ -18,13 +18,13 @@ class QUIC(Packet):
         XIntField("version", 0x1 ) ,
         # Connection IDs(DCID / SCID )
         BitFieldLenField("DCIL", None , 8, length_of ="DCID") ,
-        StrLenField("DCID", b'', length_from = lambda pkt : pkt.DCIL ) ,
+        StrLenField("DCID", b'', length_from = lambda pkt : pkt.DCIL) ,
         BitFieldLenField("SCIL", None , 8, length_of ="SCID") ,
-        StrLenField("SCID", b'', length_from = lambda pkt : pkt.SCIL ) ,
+        StrLenField("SCID", b'', length_from = lambda pkt : pkt.SCIL) ,
         # Token(only when type is initial )
         ConditionalField(QuicVarLenField("token_length", None , length_of ="token") ,
                             lambda pkt : pkt.version != 0 and pkt.type == 0) ,
-        ConditionalField(StrLenField("token", b'', length_from = lambda pkt : pkt.token_length ),
+        ConditionalField(StrLenField("token", b'', length_from = lambda pkt : pkt.token_length),
                             lambda pkt : pkt.version != 0 and pkt.type == 0),
         # Length(only when type is 0 - RTT or initial )
         ConditionalField(QuicVarLenField("length", None) ,
@@ -54,38 +54,44 @@ class QUIC(Packet):
         encryptor = Cipher(algorithms.AES(hp) , modes.ECB(), backend = default_backend()).encryptor()
         mask = encryptor.update(sample) + encryptor.finalize()
         # Encrypt the flags and the PN
-        #adjust length based on new payload
         encrypted_header = bytearray(raw_header)
+
         # The least significant bits of the first byte of the packet are masked(packet number length)
         # by the least significant bits of the first mask byte, and the packet number is masked with the remaining bytes.
-        
         for i in range(PNL):
             encrypted_header[-PNL + i] ^= mask[i+1]
+
+        # adjust length based on new payload
+        # disabled for now...
         encrypted_header = bytes(encrypted_header)
         encrypted_header = QUIC(encrypted_header).set_length(encrypted_header,encrypted_payload)
         encrypted_header = bytearray(encrypted_header)
+        # mask PNL
         encrypted_header[0] ^= (mask[0] & 0x0f)
         return bytes(encrypted_header) + encrypted_payload
 
     def get_length(self, pkt):
-        _, length_field_size = VarInt().decode(self.length)
+        #_, length_field_size = VarInt().decode(self.length)
         #calculate offset
-        pn_offset = 7 + self.DCIL + self.SCIL + length_field_size
+        pn_offset = 7 + len(self.DCID) + max(1,len(self.SCID)) + 2
         #if packet_type == Initial:
-        pn_offset += self.token_length + len(self.token)
-        length = pkt[self.PNL+pn_offset:-(self.PNL+1)]
-        return length
+        pn_offset +=  len(self.token)
+        length_size = pkt[pn_offset] >> 6
+        length_size = int(math.pow(2,length_size))
+        length = pkt[pn_offset:pn_offset+length_size]
+        return length, length_size , pn_offset
 
     def set_length(self, pkt, pay):
         #pkt += pay  # if you also want the payload to be taken into account
-        length_field_size = 0
-        if self.length is not None:
-            _, length_field_size = VarInt().decode(self.length)
+        _ ,length_field_size, offset = self.get_length(pkt)
+        if self.length is None:
+            length_field_size = 0
         pkt_len = len(pay)
         tmp_len = self.PNL + 1 + pkt_len
         encoded_len = VarInt(tmp_len).encode()
         # Adds length before PN field
-        pkt = pkt[:-(self.PNL +2+length_field_size)] + encoded_len + pkt[-(self.PNL+1):]  
+        #pkt = pkt[:offset] + encoded_len + pkt[offset+length_field_size:] 
+        #pkt =  pkt[:-(self.PNL+2+length_field_size)] + encoded_len + pkt[-(self.PNL+1):] 
         return pkt
 
     def post_build(self, pkt, pay):
