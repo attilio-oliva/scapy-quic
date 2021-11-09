@@ -1,10 +1,33 @@
+from enum import Enum
 from scapy.all import *
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
+from scapy.layers.tls.crypto.hkdf import TLS13_HKDF
 from fields import QuicVarLenField
+from frames import PaddingFrame
 
 from varint import VarInt
 
+AES128_TAG_LENGTH = 16
+QUIC1_INITIAL_SALT = "38762cf7f55934b34d179ae6a4c80cadccbb7f0a"
+CRYPTO_FRAME_EXAMPLE = """060041290100012503038df6a32f216764991e7c23959df309a561430025bd405afa27478f8fa0e41ebb
+                        000026c02bc02fc02cc030cca9cca8c009c013c00ac014009c009d002f0035c012000a13011302130301
+                        0000d60000000c000a00000773657276657234000500050100000000000a000a0008001d001700180019
+                        000b00020100000d001a0018080404030807080508060401050106010503060302010203ff0100010000
+                        10000d000b0a68712d696e7465726f7000120000002b0003020304003300260024001d0020631003f771
+                        b845987ff0e8e61c3a1a071b8e46b12c16a47a6802ee0f819365530039003c47db02a841050480080000
+                        0604800800000704800800000404800c00000802406409024064010480007530030245ac0b011a0c000e
+                        01040f00200100"""
+
+class QUIC_HEADER_TYPE(Enum):
+    SHORT = 0
+    LONG = 1
+
+class QUIC_PACKET_TYPE(Enum):
+    INITIAL = 0
+    ZERORTT = 1
+    HANDSHAKE = 2
+    RETRY = 3
 
 class QUIC(Packet):
     fields_desc = [
@@ -14,24 +37,60 @@ class QUIC(Packet):
         BitEnumField("type", 0, 2, {0:"initial", 1:"0-RTT", 2:"handshake", 3:"retry"}),
         BitField("reserved", 0, 2) ,
         BitFieldLenField("PNL", 0 , 2 , length_of ="PN", adjust = lambda pkt,x: x-1) ,
-        # Version
         XIntField("version", 0x1 ) ,
         # Connection IDs(DCID / SCID )
         BitFieldLenField("DCIL", None , 8, length_of ="DCID") ,
         StrLenField("DCID", b'', length_from = lambda pkt : pkt.DCIL) ,
         BitFieldLenField("SCIL", None , 8, length_of ="SCID") ,
         StrLenField("SCID", b'', length_from = lambda pkt : pkt.SCIL) ,
-        # Token(only when type is initial )
+        # Token(only when type is initial)
         ConditionalField(QuicVarLenField("token_length", None , length_of ="token") ,
                             lambda pkt : pkt.version != 0 and pkt.type == 0) ,
         ConditionalField(StrLenField("token", b'', length_from = lambda pkt : pkt.token_length),
                             lambda pkt : pkt.version != 0 and pkt.type == 0),
-        # Length(only when type is 0 - RTT or initial )
+        # Length(only when type is 0 - RTT or initial)
         ConditionalField(QuicVarLenField("length", None) ,
                            lambda pkt : pkt.version != 0 and pkt.type != 3) ,
-        # Packet Number(only when type is 0 - RTT or initial )
+        # Packet Number(only when type is 0 - RTT or initial)
         ConditionalField(StrLenField("PN", b'\x00', length_from = lambda pkt : pkt.PNL+1) ,
-                            lambda pkt : pkt.version != 0 and pkt.type != 3) ]
+                            lambda pkt : pkt.version != 0 and pkt.type != 3)]
+    
+    @classmethod
+    def initial(cls, DCID, SCID, desired_length : int = 1250, other_frames=b''):
+        initial_salt = bytes.fromhex(QUIC1_INITIAL_SALT)
+        initial_secret = TLS13_HKDF().extract(initial_salt, DCID)
+
+        client_initial_secret = TLS13_HKDF().expand_label(initial_secret, b"client in", b"", 32)
+        server_initial_secret = TLS13_HKDF().expand_label(initial_secret,b"server in", b"", 32)
+                                            
+        key = TLS13_HKDF().expand_label(client_initial_secret, b"quic key", b"",16)
+        iv = TLS13_HKDF().expand_label(client_initial_secret, b"quic iv", b"", 12)
+        hp = TLS13_HKDF().expand_label(client_initial_secret, b"quic hp", b"",16)
+
+        # Calculate protected crypto frame and header length to decide on padding length
+        header_len = len(cls(DCID=DCID, SCID=SCID))
+
+        crypto_frame = bytes.fromhex(CRYPTO_FRAME_EXAMPLE)
+        crypto_len = len(crypto_frame)
+        final_crypto_len = crypto_len + AES128_TAG_LENGTH
+
+        padding_len = desired_length - header_len - final_crypto_len
+        padding = bytes(PaddingFrame())*padding_len
+
+        payload = crypto_frame + padding
+        # Update length field manually
+        quic_packet_header = cls(header_type = QUIC_HEADER_TYPE.LONG.value , type = QUIC_PACKET_TYPE.INITIAL.value,
+                                    DCID = DCID, SCID = SCID)
+        length_field = final_crypto_len + padding_len + quic_packet_header.PNL + 1
+        quic_packet_header.length = VarInt(length_field).encode()
+
+        quic_packet = quic_packet_header / payload
+
+        # Encrypt whole packet
+        encrypted_quic_packet = QUIC.protect((key,iv,hp), quic_packet)   
+
+        return QUIC(encrypted_quic_packet)
+        
     def protect(material , packet):
         (key, iv, hp) = material
         header = packet.copy()
@@ -48,11 +107,13 @@ class QUIC(Packet):
         # Extract the sample
         PNL = header.PNL + 1
 
-        sample_start = 4 - PNL# The receiver will assume PNL is 4
+        sample_start = 4 - PNL # The receiver will assume PNL is 4
         sample = encrypted_payload[sample_start : sample_start + 16]
+
         # Compute the mask
         encryptor = Cipher(algorithms.AES(hp) , modes.ECB(), backend = default_backend()).encryptor()
         mask = encryptor.update(sample) + encryptor.finalize()
+
         # Encrypt the flags and the PN
         encrypted_header = bytearray(raw_header)
 
@@ -63,9 +124,10 @@ class QUIC(Packet):
 
         # adjust length based on new payload
         # disabled for now...
-        encrypted_header = bytes(encrypted_header)
-        encrypted_header = QUIC(encrypted_header).set_length(encrypted_header,encrypted_payload)
-        encrypted_header = bytearray(encrypted_header)
+        #encrypted_header = bytes(encrypted_header)
+        #encrypted_header = QUIC(encrypted_header).set_length(encrypted_header,encrypted_payload)
+        #encrypted_header = bytearray(encrypted_header)
+
         # mask PNL
         encrypted_header[0] ^= (mask[0] & 0x0f)
         return bytes(encrypted_header) + encrypted_payload
