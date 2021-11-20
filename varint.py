@@ -15,13 +15,15 @@ class VarInt():
         if num is None:
             num = self.number
         self.number = num
-
+        
+        #two bits are used to encode integer length
+        encoded_length_bits = 2
         # We need atleast 1 bit that translate in atleast 1 byte
         # bit_length() returns 0 if the integer is 0
         bit_length = num.bit_length()
         bit_length = max(bit_length, 1)
 
-        byte_length = math.ceil(bit_length/8)
+        byte_length = math.ceil((bit_length+encoded_length_bits)/8)
         byte_length = max(byte_length, 1)
 
         encoded_length = math.ceil(math.log(byte_length,2))

@@ -4,20 +4,13 @@ from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.backends import default_backend
 from scapy.layers.tls.crypto.hkdf import TLS13_HKDF
 from fields import QuicVarLenField
-from frames import PaddingFrame
+from frames import CryptoFrame, PaddingFrame
 
 from varint import VarInt
 
 AES128_TAG_LENGTH = 16
 QUIC1_INITIAL_SALT = "38762cf7f55934b34d179ae6a4c80cadccbb7f0a"
-CRYPTO_FRAME_EXAMPLE = """060041290100012503038df6a32f216764991e7c23959df309a561430025bd405afa27478f8fa0e41ebb
-                        000026c02bc02fc02cc030cca9cca8c009c013c00ac014009c009d002f0035c012000a13011302130301
-                        0000d60000000c000a00000773657276657234000500050100000000000a000a0008001d001700180019
-                        000b00020100000d001a0018080404030807080508060401050106010503060302010203ff0100010000
-                        10000d000b0a68712d696e7465726f7000120000002b0003020304003300260024001d0020631003f771
-                        b845987ff0e8e61c3a1a071b8e46b12c16a47a6802ee0f819365530039003c47db02a841050480080000
-                        0604800800000704800800000404800c00000802406409024064010480007530030245ac0b011a0c000e
-                        01040f00200100"""
+CRYPTO_FRAME_EXAMPLE = """06004179010001750303eb37c6b91cb774d00764ba790be740a2e8ad3a4e3f4a0c2eb70ab8427f0fbbb300000613021301130301000146003300a700a50017004104befd9f8fc558861f68e9dd3bf09e35256e6785504f54a482d37145f41037aebf733f25d4ddc92e925650377ad0cc3f77afd8a06bef2b9e6fb746699811bd8ce7001d002037c80c2e3a521a0d1ee829e844770a3b87674a746fc7b498131a9e985d1d1a4d001e00388d88026aaaa24f47d6e45420212da5bccdf8acb51f7b2c08a318585396054b01fb5a1f856b2168c0f37ab1b3fca83ea91369666d14c9606a002b0003020304000d000e000c080404030401020108070808000a000800060017001d001e002d000201010000000e000c0000096c6f63616c686f73740010001d001b0268330568332d33320568332d33310568332d33300568332d32390039003901048000ea6004048010000005048010000006048010000007048010000008024080090240800a01030b01190e01080f0878643036af1314e2"""
 
 class QUIC_HEADER_TYPE(Enum):
     SHORT = 0
@@ -71,6 +64,7 @@ class QUIC(Packet):
         header_len = len(cls(DCID=DCID, SCID=SCID))
 
         crypto_frame = bytes.fromhex(CRYPTO_FRAME_EXAMPLE)
+        crypto_frame = bytes(CryptoFrame().initial())
         crypto_len = len(crypto_frame)
         final_crypto_len = crypto_len + AES128_TAG_LENGTH
 
@@ -83,7 +77,7 @@ class QUIC(Packet):
                                     DCID = DCID, SCID = SCID)
         length_field = final_crypto_len + padding_len + quic_packet_header.PNL + 1
         quic_packet_header.length = VarInt(length_field).encode()
-
+        
         quic_packet = quic_packet_header / payload
 
         # Encrypt whole packet
