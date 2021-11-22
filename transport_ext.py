@@ -47,14 +47,15 @@ class QUIC_Ext_Transport(TLS_Ext_Unknown):
                                   QUIC_Transport_Param,
                                   length_from=lambda pkt: pkt.len)]
     @classmethod
-    def initial(cls):
-        list = [QUIC_Transport_Param(type=0x01,value=b'\x80\x75\x30\x00'), #max_idle_timeout
+    def initial(cls, scid):
+        list = [QUIC_Transport_Param(type=0x01,value=b'\x80\x00\x75\x30'), #max_idle_timeout
                 QUIC_Transport_Param(type=0x04,value=b'\x45\xAC'), #max_payload
+                QUIC_Transport_Param(type=0x0f,value=scid), #initial_source_conn_id
                 ]
         ext = QUIC_Ext_Transport()
         
         ext.parameters = list
         ext.len = sum(len(bytes(param)) for param in ext.parameters)
-        print(bytes(ext.parameters[1]))
+        
         return ext
 

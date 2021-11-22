@@ -64,7 +64,7 @@ class QUIC(Packet):
         header_len = len(cls(DCID=DCID, SCID=SCID))
 
         crypto_frame = bytes.fromhex(CRYPTO_FRAME_EXAMPLE)
-        crypto_frame = bytes(CryptoFrame().initial())
+        crypto_frame = bytes(CryptoFrame().initial(SCID))
         crypto_len = len(crypto_frame)
         final_crypto_len = crypto_len + AES128_TAG_LENGTH
 

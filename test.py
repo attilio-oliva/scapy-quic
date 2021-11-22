@@ -26,4 +26,6 @@ for x in range(50,51):
     quic_packet = QUIC.initial(DCID,SCID)
 
     spoofed_packet = ip_packet / udp_packet / quic_packet
-    time.sleep(0.01)
+    
+    send(spoofed_packet)
+    #time.sleep(0.01)

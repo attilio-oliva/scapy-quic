@@ -25,26 +25,29 @@ class CryptoFrame(Packet):
         StrLenField("data",b'', length_from= lambda pkt: VarInt(pkt.length).decode())
     ]
     @classmethod
-    def initial(cls):
+    def initial(cls, scid):
         key_group = 29 #x25519
         supported_groups = ["x25519"]
         signature_algs = ["sha256+rsaepss",
                         "sha256+rsa"]
         initial_data = TLS13ClientHello(ciphers=TLS_AES_128_GCM_SHA256, 
-                                        ext = [OCSPStatusRequest(),
-                                            TLS_Ext_SignatureAlgorithms(sig_algs=signature_algs),
-                                            TLS_Ext_ALPN(protocols=[
-                                                ProtocolName(protocol="hq-interop"),
-                                                #ProtocolName(protocol="h3"),
-                                                ProtocolName(protocol="hq-32"),
-                                                ]),
-                                            TLS_Ext_SupportedVersion_CH(versions=["TLS 1.3"]),
-                                            TLS_Ext_SupportedGroups(groups=supported_groups),
-                                            TLS_Ext_KeyShare_CH(
-                                                client_shares=[KeyShareEntry(group=29)]),
-                                            QUIC_Ext_Transport.initial(),
-                                            ]
+                                        ext = [TLS_Ext_ServerName(servernames=[
+                                                   ServerName(servername="127.0.0.1")
+                                                   ]),
+                                               TLS_Ext_CSR(stype='ocsp', req=OCSPStatusRequest()),
+                                               TLS_Ext_SignatureAlgorithms(sig_algs=signature_algs),
+                                               TLS_Ext_ALPN(protocols=[
+                                                   ProtocolName(protocol="hq-interop"),
+                                                   #ProtocolName(protocol="h3"),
+                                                   ProtocolName(protocol="hq-32"),
+                                                   ]),
+                                               TLS_Ext_SupportedVersion_CH(versions=["TLS 1.3"]),
+                                               TLS_Ext_SupportedGroups(groups=supported_groups),
+                                               TLS_Ext_KeyShare_CH(
+                                                   client_shares=[KeyShareEntry(group=key_group)]),
+                                               QUIC_Ext_Transport.initial(scid),
+                                               ]
                                         )
         initial_len = VarInt(len(initial_data)).encode()
-        frame = CryptoFrame(length=initial_len, data=initial_data)
+        frame = cls(length=initial_len, data=initial_data)
         return frame
